@@ -27,9 +27,15 @@ local band = bit.band
 --   shared_state[1] = 0 or 1, set by subprocess when rendering done, waiting to save cache
 --   shared_state[2] = 0 or 1, set by main process when subprocess can go on saving cache
 local ffi = require("ffi")
-local shared_state_data = ffi.C.mmap(nil, 3*ffi.sizeof("uint32_t"), bit.bor(ffi.C.PROT_READ, ffi.C.PROT_WRITE),
-                                       bit.bor(ffi.C.MAP_SHARED, ffi.C.MAP_ANONYMOUS), -1, 0)
-local shared_state = ffi.cast("uint32_t*", shared_state_data)
+local shared_state_size = 3 * ffi.sizeof("uint32_t")
+local shared_state_data = ffi.C.mmap(nil, shared_state_size, bit.bor(ffi.C.PROT_READ, ffi.C.PROT_WRITE),
+                                     bit.bor(ffi.C.MAP_SHARED, ffi.C.MAP_ANONYMOUS), -1, 0)
+local shared_state
+if tonumber(ffi.cast("intptr_t", shared_state_data)) ~= ffi.C.MAP_FAILED then
+    shared_state = ffi.cast("uint32_t*", shared_state_data)
+else
+    logger.warn("ReaderRolling: failed to allocate shared rerender state:", ffi.string(ffi.C.strerror(ffi.errno())))
+end
 local koreader_pid = ffi.C.getpid()
 
 --[[
@@ -1893,6 +1899,10 @@ function ReaderRolling:tearDownRerenderingAutomation()
 end
 
 function ReaderRolling:_rerenderInBackground()
+    if not shared_state then
+        return nil
+    end
+
     Device:enableCPUCores(2)
 
     -- Set up mmap segment to exchange signals between main and sub processes
